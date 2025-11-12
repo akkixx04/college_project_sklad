@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QPainter, QPainterPath
 
+# Логотип
 class Logo(QLabel):
     def __init__(self, image_path, size=120, border_width=2):
         super().__init__()
@@ -35,7 +36,8 @@ class Logo(QLabel):
         self.setPixmap(circle)
         self.setFixedSize(size, size)
 
-# Выпадающая секция
+
+# Выпадающая секция бокового меню
 class ExpandableSection(QWidget):
     def __init__(self, title, items, main_window):
         super().__init__()
@@ -93,13 +95,12 @@ class ExpandableSection(QWidget):
         self.button.setText(f"▼  {self.title}" if state else f"▶  {self.title}")
 
     def open_page(self, page_name):
-        # Страница "Единицы измерения" со своей таблицей
-        if page_name == "Единицы измерения":
-            self.main_window.pages.setCurrentWidget(self.main_window.units_page)
-            self.main_window.units_page.load_data()
-            return
-
-        if page_name not in self.main_window.pages_dict:
+        if page_name in self.main_window.pages_dict:
+            self.main_window.pages.setCurrentWidget(self.main_window.pages_dict[page_name])
+            widget = self.main_window.pages_dict[page_name]
+            if hasattr(widget, "load_data"):
+                widget.load_data()
+        else:
             page = QWidget()
             layout = QVBoxLayout(page)
             layout.setAlignment(Qt.AlignCenter)
@@ -109,28 +110,27 @@ class ExpandableSection(QWidget):
             layout.addWidget(label)
             self.main_window.pages.addWidget(page)
             self.main_window.pages_dict[page_name] = page
+            self.main_window.pages.setCurrentWidget(page)
 
-        self.main_window.pages.setCurrentWidget(self.main_window.pages_dict[page_name])
 
-# Единицы измерения
-class UnitsPage(QWidget):
-    def __init__(self):
+# Универсальный класс таблицы
+class TablePage(QWidget):
+    def __init__(self, title, headers, data_loader):
         super().__init__()
+        self.data_loader = data_loader
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Заголовок страницы
-        title = QLabel("Единицы измерения")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 26px; font-weight: bold; margin: 20px; color: black;"
-        )
-        layout.addWidget(title)
+        # Заголовок
+        title_label = QLabel(title)
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("font-size: 26px; font-weight: bold; margin: 20px; color: black;")
+        layout.addWidget(title_label)
 
         # Таблица
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["ID", "Наименование", "Код"])
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.setStyleSheet("""
             QTableWidget {
                 font-size: 16px;
@@ -150,26 +150,12 @@ class UnitsPage(QWidget):
         """)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(True)
-
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
-
-        total_width = self.width() - 40  
-        id_width = 50
-        name_width = int(total_width * 0.8)
-        code_width = int(total_width * 0.4) - id_width
-
-        self.table.setColumnWidth(0, id_width)     # ID
-        self.table.setColumnWidth(1, name_width)   # Наименование
-        self.table.setColumnWidth(2, code_width)   # Код
-
-        self.table.horizontalHeader().setStretchLastSection(True)
-
         layout.addWidget(self.table)
-
         QTimer.singleShot(0, self.load_data)
 
     def load_data(self):
-        rows = db.get_units()
+        rows = self.data_loader()
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             for col_index, value in enumerate(row):
@@ -179,7 +165,14 @@ class UnitsPage(QWidget):
                 self.table.setItem(row_index, col_index, item)
         self.table.resizeRowsToContents()
 
-# Главное окно 
+        total_width = self.width() - 40
+        if self.table.columnCount() > 0:
+            col_width = total_width // self.table.columnCount()
+            for i in range(self.table.columnCount()):
+                self.table.setColumnWidth(i, col_width)
+
+
+# Главное окно
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -215,8 +208,8 @@ class MainWindow(QMainWindow):
             QPushButton:hover { background-color: #999999; }
         """)
         scroll_layout.addWidget(btn_main)
+        btn_main.clicked.connect(lambda: self.pages.setCurrentWidget(self.pages_dict["Главная"]))
 
-        # Создаем разделы
         refs = ExpandableSection("Справочники", [
             "Номенклатура", "Категории номенклатуры", "Единицы измерения",
             "Склады", "Сотрудники", "Контрагенты"
@@ -230,7 +223,6 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(refs)
         scroll_layout.addWidget(docs)
         scroll_layout.addWidget(reports)
-
         scroll_layout.addStretch()
         scroll.setWidget(scroll_content)
         sidebar_layout.addWidget(scroll)
@@ -244,6 +236,7 @@ class MainWindow(QMainWindow):
         exit_btn.clicked.connect(QApplication.quit)
         sidebar_layout.addWidget(exit_btn)
 
+        # Страницы
         self.pages = QStackedWidget()
 
         placeholder = QWidget()
@@ -256,14 +249,46 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(placeholder)
         self.pages_dict["Главная"] = placeholder
 
-        self.units_page = UnitsPage()
+        # Таблицы
+        self.units_page = TablePage("Единицы измерения",
+            ["ID", "Наименование", "Код"], db.get_units)
         self.pages.addWidget(self.units_page)
         self.pages_dict["Единицы измерения"] = self.units_page
+
+        self.categories_page = TablePage("Категории номенклатуры",
+            ["ID", "Наименование", "Описание"], db.get_categories)
+        self.pages.addWidget(self.categories_page)
+        self.pages_dict["Категории номенклатуры"] = self.categories_page
+
+        self.nomenclature_page = TablePage("Номенклатура",
+            ["ID", "Наименование", "ID категории", "ID единицы", "Артикул", "Описание"],
+            db.get_nomenclature)
+        self.pages.addWidget(self.nomenclature_page)
+        self.pages_dict["Номенклатура"] = self.nomenclature_page
+
+        self.employees_page = TablePage("Сотрудники",
+            ["Фамилия", "Имя", "Отчество", "Должность", "Телефон", "Email"],
+            db.get_employees)
+        self.pages.addWidget(self.employees_page)
+        self.pages_dict["Сотрудники"] = self.employees_page
+
+        self.contractors_page = TablePage("Контрагенты",
+            ["ID", "Наименование", "Тип", "Менеджер", "Телефон", "Email", "Адрес"],
+            db.get_contractors)
+        self.pages.addWidget(self.contractors_page)
+        self.pages_dict["Контрагенты"] = self.contractors_page
+
+        self.warehouses_page = TablePage("Склады",
+            ["ID", "Наименование", "Адрес", "Вместимость (м²)", "Ответственный"],
+            db.get_warehouses)
+        self.pages.addWidget(self.warehouses_page)
+        self.pages_dict["Склады"] = self.warehouses_page
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(self.pages)
 
-# Запуск
+
+# --- Запуск ---
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
