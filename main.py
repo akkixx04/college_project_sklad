@@ -343,21 +343,36 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.categories_page)
         self.pages_dict["Категории номенклатуры"] = self.categories_page
 
-        self.nomenclature_page = TablePage("Номенклатура", ["ID", "Наименование", "ID категории", "ID единицы", "Артикул", "Описание"], db.get_nomenclature)
+        self.nomenclature_page = TablePage("Номенклатура", ["ID", "Наименование", "Категория", "Единица измерения", "Артикул", "Описание"], db.get_nomenclature)
         self.pages.addWidget(self.nomenclature_page)
         self.pages_dict["Номенклатура"] = self.nomenclature_page
 
-        self.employees_page = TablePage("Сотрудники", ["Фамилия", "Имя", "Отчество", "Должность", "Телефон", "Email"], db.get_employees)
+        self.employees_page = TablePage("Сотрудники", ["ID", "Фамилия", "Имя", "Отчество", "Должность", "Телефон", "Email"], db.get_employees)
         self.pages.addWidget(self.employees_page)
         self.pages_dict["Сотрудники"] = self.employees_page
 
-        self.contractors_page = TablePage("Контрагенты", ["ID", "Наименование", "Тип", "Менеджер", "Телефон", "Email", "Адрес"], db.get_contractors)
+        self.contractors_page = TablePage("Контрагенты", ["ID", "Наименование", "Менеджер", "Телефон", "Email", "Адрес"], db.get_contractors)
         self.pages.addWidget(self.contractors_page)
         self.pages_dict["Контрагенты"] = self.contractors_page
 
         self.warehouses_page = TablePage("Склады", ["ID", "Наименование", "Адрес", "Вместимость (м²)", "Ответственный"], db.get_warehouses)
         self.pages.addWidget(self.warehouses_page)
         self.pages_dict["Склады"] = self.warehouses_page
+
+        self.prihod_page = TablePage("Оприходование",["ID документа", "Номер", "Дата", "Сотрудник","Контрагент", "Склад", "Номенклатура",
+        "Количество", "Комментарий", "Проведен"],db.get_prihod_documents_full)
+        self.pages.addWidget(self.prihod_page)
+        self.pages_dict["Оприходование"] = self.prihod_page
+
+        self.rashod_page = TablePage("Расход",["ID документа", "Номер", "Дата", "Сотрудник","Склад", 
+        "Номенклатура","Количество", "Комментарий", "Проведен"],db.get_rashod_documents_full)
+        self.pages.addWidget(self.rashod_page)
+        self.pages_dict["Расход"] = self.rashod_page
+
+        self.peremeshchenie_page = TablePage("Перемещение",["ID документа", "Номер", "Дата", "Сотрудник",
+        "Склад-отправитель", "Склад-получатель", "Номенклатура", "Количество","Комментарий", "Проведен"],db.get_peremeshchenie_documents_full)
+        self.pages.addWidget(self.peremeshchenie_page)
+        self.pages_dict["Перемещение"] = self.peremeshchenie_page
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(self.pages)
