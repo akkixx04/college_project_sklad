@@ -306,3 +306,103 @@ def get_peremeshchenie_documents_full():
     cur.close()
     conn.close()
     return rows
+
+def get_last_operations(limit=10):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            o.date,
+            o.operation_type,
+            n.title AS nomenclature,
+            o.quantity,
+            w.title AS warehouse
+        FROM operations o
+        JOIN nomenclature n ON o.id_nomenclature = n.id_nomenclature
+        JOIN warehouses w ON o.id_warehouse = w.id_warehouse
+        ORDER BY o.date DESC, o.id_operation DESC
+        LIMIT %s;
+    """, (limit,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+def get_operations_full():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            o.date,
+            o.operation_type,
+            n.title AS nomenclature,
+            o.quantity,
+            w.title AS warehouse
+        FROM operations o
+        JOIN nomenclature n ON o.id_nomenclature = n.id_nomenclature
+        JOIN warehouses w ON o.id_warehouse = w.id_warehouse
+        ORDER BY o.date, n.title;
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+def get_stock_balances():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            w.title AS warehouse,
+            n.title AS nomenclature,
+            u.code_unit AS unit,
+            SUM(
+                CASE
+                    WHEN o.operation_type = 'приход' THEN o.quantity
+                    WHEN o.operation_type = 'расход' THEN -o.quantity
+                    ELSE 0
+                END
+            ) AS balance
+        FROM operations o
+        JOIN warehouses w ON o.id_warehouse = w.id_warehouse
+        JOIN nomenclature n ON o.id_nomenclature = n.id_nomenclature
+        JOIN units u ON n.id_unit = u.id_unit
+        GROUP BY w.title, n.title, u.code_unit
+        HAVING SUM(
+            CASE
+                WHEN o.operation_type = 'приход' THEN o.quantity
+                WHEN o.operation_type = 'расход' THEN -o.quantity
+                ELSE 0
+            END
+        ) <> 0
+        ORDER BY w.title, n.title;
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+def get_turnover_report():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT
+            w.title AS warehouse,
+            n.title AS nomenclature,
+            u.code_unit AS unit,
+            SUM(CASE WHEN o.operation_type='приход' THEN o.quantity ELSE 0 END) AS total_in,
+            SUM(CASE WHEN o.operation_type='расход' THEN o.quantity ELSE 0 END) AS total_out,
+            SUM(CASE WHEN o.operation_type='приход' THEN o.quantity 
+                    WHEN o.operation_type='расход' THEN -o.quantity
+                    ELSE 0 END) AS balance
+        FROM operations o
+        JOIN warehouses w ON o.id_warehouse = w.id_warehouse
+        JOIN nomenclature n ON o.id_nomenclature = n.id_nomenclature
+        JOIN units u ON n.id_unit = u.id_unit
+        GROUP BY w.title, n.title, u.code_unit
+        ORDER BY w.title, n.title;
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
