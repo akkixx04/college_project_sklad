@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QPushButton, QLabel,
     QVBoxLayout, QHBoxLayout, QFrame, QStackedWidget, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy,
-    QDialog, QFormLayout, QLineEdit, QComboBox, QMessageBox, QDateEdit, QSpinBox, QDoubleSpinBox
+    QDialog, QFormLayout, QLineEdit, QComboBox, QMessageBox, QDateEdit, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QTimer, QDate
 from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QIcon
