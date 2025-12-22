@@ -143,6 +143,126 @@ class ExpandableSection(QWidget):
             self.main_window.pages_dict[page_name] = page
             self.main_window.pages.setCurrentWidget(page)
 
+class DashboardPage(QWidget):
+    def __init__(self):
+        super().__init__()
+        main_layout = QVBoxLayout(self)
+
+        content_layout = QHBoxLayout()
+        main_layout.addLayout(content_layout)
+
+        # ===== Левая таблица: критические остатки =====
+        self.critical_table = QTableWidget()
+        self.critical_table.setColumnCount(4)
+        self.critical_table.setHorizontalHeaderLabels([
+            "Склад",
+            "Номенклатура",
+            "Ед. изм.",
+            "Остаток"
+        ])
+        self._style_table(self.critical_table)
+
+        # ===== Правая таблица: последние операции =====
+        self.operations_table = QTableWidget()
+        self.operations_table.setColumnCount(5)
+        self.operations_table.setHorizontalHeaderLabels(
+            ["Дата", "Тип", "Номенклатура", "Кол-во", "Склад"]
+        )
+        self._style_table(self.operations_table)
+
+        # ===== ЛЕВАЯ ЧАСТЬ =====
+        left_layout = QVBoxLayout()
+
+        # ===== Левый заголовок =====
+        critical_title = QLabel("Критические остатки по складам")
+        critical_title.setAlignment(Qt.AlignCenter)  # выравнивание по центру
+        critical_title.setStyleSheet("""
+            font-size: 24px;
+            font-weight: bold;
+            color: black;
+            margin-bottom: 25px;
+            margin-top: 20px;                         
+        """)
+        left_layout.addWidget(critical_title)
+        left_layout.addWidget(self.critical_table)
+
+        # ===== Правая часть =====
+        right_layout = QVBoxLayout()
+
+        operations_title = QLabel("Последние операции")
+        operations_title.setAlignment(Qt.AlignCenter)  # выравнивание по центру
+        operations_title.setStyleSheet("""
+            font-size: 24px;
+            font-weight: bold;
+            color: black;
+            margin-bottom: 25px;
+            margin-top: 20px;                            
+        """)
+        right_layout.addWidget(operations_title)
+        right_layout.addWidget(self.operations_table)
+
+        # ===== Объединяем в горизонтальный layout =====
+        content_layout.addLayout(left_layout)
+        content_layout.addLayout(right_layout)
+
+        content_layout.setStretch(0, 1)
+        content_layout.setStretch(1, 1)
+
+        self.load_data()
+
+    def _style_table(self, table):
+        table.setSortingEnabled(True)
+        table.setStyleSheet("""
+            QTableWidget {
+                font-size: 16px;
+                gridline-color: #333;
+                background-color: #F9F9F9;
+            }
+            QHeaderView::section {
+                background-color: #DDDDDD;
+                font-weight: bold;
+                font-size: 16px;
+                color: black;
+                border: 1px solid #888;
+            }
+            QTableWidget::item {
+                border: 1px solid #AAA;
+                color: black;
+            }
+        """)
+        table.verticalHeader().setVisible(False)
+        table.setWordWrap(True)
+        table.setShowGrid(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setSelectionMode(QTableWidget.SingleSelection)
+
+    def load_data(self):
+        # Критические остатки
+        crit_rows = db.get_critical_stock()
+        self.critical_table.setRowCount(len(crit_rows))
+        for r, row in enumerate(crit_rows):
+            for c, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # выравнивание текста
+                item.setFlags(Qt.ItemIsEnabled)
+                self.critical_table.setItem(r, c, item)
+
+        self.critical_table.resizeRowsToContents()  # подгоняем высоту строк
+
+
+        # Последние операции
+        op_rows = db.get_last_operations()
+        self.operations_table.setRowCount(len(op_rows))
+        for r, row in enumerate(op_rows):
+            for c, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                item.setFlags(Qt.ItemIsEnabled)
+                self.operations_table.setItem(r, c, item)
+        self.operations_table.resizeRowsToContents()
+
 # Универсальный класс таблицы
 class TablePage(QWidget):
     def __init__(self, title, headers, data_loader):
@@ -157,6 +277,7 @@ class TablePage(QWidget):
         layout.addWidget(title_label)
 
         self.table = QTableWidget()
+        self.table.setSortingEnabled(True)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setStyleSheet("""
@@ -182,6 +303,32 @@ class TablePage(QWidget):
         layout.addWidget(self.table)
         QTimer.singleShot(0, self.load_data)
 
+        if "Остатки на складах" in title or "Движение по номенклатуре" in title or "Оборотная ведомость" in title:
+            search_layout = QHBoxLayout()
+            search_layout.addStretch()
+
+            self.search_edit = QLineEdit()
+            self.search_edit.setPlaceholderText("Поиск...")
+            self.search_edit.setMaximumWidth(300)
+            self.search_edit.setMinimumHeight(35)
+            self.search_edit.textChanged.connect(self.apply_filter)
+
+            search_layout.addWidget(self.search_edit)
+            layout.insertLayout(1, search_layout)
+            self.search_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: #AAAAAA;
+                    color: black;
+                    font-weight: bold;
+                    font-size: 16px;
+                    border-radius: 5px;
+                }
+                QLineEdit:hover {
+                    background-color: #999999;
+                }
+            """)
+
+
     def load_data(self):
         rows = self.data_loader()
         self.table.setRowCount(len(rows))
@@ -192,6 +339,18 @@ class TablePage(QWidget):
                 item.setForeground(Qt.black)
                 self.table.setItem(row_index, col_index, item)
         self.table.resizeRowsToContents()
+
+    def apply_filter(self, text):
+        text = text.lower()
+        for row in range(self.table.rowCount()):
+            match = False
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item and text in item.text().lower():
+                    match = True
+                    break
+            self.table.setRowHidden(row, not match)
+
 
 class ReferenceTablePage(TablePage):
     def __init__(self, title, headers, data_loader,
@@ -234,6 +393,24 @@ class ReferenceTablePage(TablePage):
         self.btn_edit.clicked.connect(self.edit_item)
         self.btn_delete.clicked.connect(self.delete_item)
 
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск...")
+        self.search_edit.setMinimumHeight(35)
+        self.search_edit.textChanged.connect(self.apply_filter)
+        layout.addWidget(self.search_edit)
+        self.search_edit.setStyleSheet("""
+            QLineEdit {
+                background-color: #AAAAAA;
+                color: black;
+                font-weight: bold;
+                font-size: 16px;
+                border-radius: 5px;
+            }
+            QLineEdit:hover {
+                background-color: #999999;
+            }
+        """)
+
     # Получение выбранного ID
     def _get_selected_id(self):
         row = self.table.currentRow()
@@ -266,19 +443,23 @@ class ReferenceTablePage(TablePage):
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактирование" if item_id else "Добавление")
         dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
-
         layout = QVBoxLayout(dialog)
         form = QFormLayout()
         layout.addLayout(form)
+        font = QFont()
+        font.setPointSize(10)
+
         inputs = {}
 
         for field_def in self.fields:
             field = field_def[0]
             label = field_def[1]
 
-            if len(field_def) == 3:
+            if len(field_def) == 3:  # FK поле
                 fk = field_def[2]
                 combo = QComboBox()
+                combo.setFont(font)
+                combo.setStyleSheet("background-color: white; color: black;")  # Белый фон, черный текст
                 fk_data = self._load_fk_data(fk)
                 for fk_id, fk_title in fk_data:
                     combo.addItem(str(fk_title), fk_id)
@@ -289,8 +470,10 @@ class ReferenceTablePage(TablePage):
                 inputs[field] = combo
                 form.addRow(label + ":", combo)
 
-            else:
+            else:  # обычное текстовое поле
                 edit = QLineEdit()
+                edit.setFont(font)
+                edit.setStyleSheet("background-color: white; color: black;")  # Белый фон, черный текст
                 if data:
                     edit.setText(str(data.get(field, "")))
                 inputs[field] = edit
@@ -349,7 +532,6 @@ class ReferenceTablePage(TablePage):
         confirm.setText(f"Вы уверены, что хотите удалить запись {item_id}?")
         confirm.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
 
-        # Кнопки
         yes_button = confirm.button(QMessageBox.Yes)
         no_button = confirm.button(QMessageBox.No)
         yes_button.setText("Да")
@@ -430,6 +612,25 @@ class DocumentTablePage(TablePage):
         self.btn_delete.clicked.connect(self.delete_document)
         self.btn_process.clicked.connect(self.process_document)
         self.btn_unprocess.clicked.connect(self.unprocess_document)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск...")
+        self.search_edit.setMinimumHeight(35)
+        self.search_edit.textChanged.connect(self.apply_filter)
+        self.search_edit.setStyleSheet("""
+            QLineEdit {
+                background-color: #AAAAAA;
+                color: black;
+                font-weight: bold;
+                font-size: 16px;
+                border-radius: 5px;
+            }
+            QLineEdit:hover {
+                background-color: #999999;
+            }
+        """)
+        top_layout.addWidget(self.search_edit)
+
 
     def get_selected_document_id(self):
         selected = self.table.currentRow()
@@ -1016,9 +1217,9 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
 
         # Таблицы
-        self.main_page = TablePage("Последние 10 операций", ["Дата", "Тип операции", "Номенклатура", "Количество", "Склад"], db.get_last_operations)
-        self.pages.addWidget(self.main_page)
-        self.pages_dict["Главная"] = self.main_page
+        self.dashboard_page = DashboardPage()
+        self.pages.addWidget(self.dashboard_page)
+        self.pages_dict["Главная"] = self.dashboard_page
 
         # Единицы измерения
         self.units_page = ReferenceTablePage(
@@ -1148,7 +1349,7 @@ class MainWindow(QMainWindow):
         self.pages_dict["Расход"] = self.rashod_page
 
         self.peremeshchenie_page = DocumentTablePage("Перемещение",["ID документа", "Номер", "Дата", "Сотрудник",
-        "Склад-отправитель", "Склад-получатель", "Номенклатура", "Количество","Комментарий", "Проведен"],db.get_peremeshchenie_documents_full, doc_type='перемещение')
+        "Отправитель", "Получатель", "Номенклатура", "Количество","Комментарий", "Проведен"],db.get_peremeshchenie_documents_full, doc_type='перемещение')
         self.pages.addWidget(self.peremeshchenie_page)
         self.pages_dict["Перемещение"] = self.peremeshchenie_page
 
