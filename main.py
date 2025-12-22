@@ -1,6 +1,5 @@
 import sys
 from functools import partial
-from datetime import date
 
 import db
 from PySide6.QtWidgets import (
@@ -12,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, QDate
 from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QIcon
 
-# --- Логотип ---
+# Логотип
 class Logo(QLabel):
     def __init__(self, image_path, size=120, border_width=2):
         super().__init__()
@@ -95,7 +94,6 @@ class ExpandableSection(QWidget):
         self.button.setText(f"▼  {self.title}" if state else f"▶  {self.title}")
 
     def open_page(self, page_name):
-        # Сброс подсветки всех кнопок
         for btn in self.sub_buttons:
             btn.setStyleSheet("""
                 QPushButton {
@@ -110,7 +108,6 @@ class ExpandableSection(QWidget):
                 }
                 QPushButton:hover { background-color: #BBBBBB; }
             """)
-        # Подсветка текущей
         for btn in self.sub_buttons:
             if btn.text() == page_name:
                 btn.setStyleSheet("""
@@ -144,6 +141,7 @@ class ExpandableSection(QWidget):
             self.main_window.pages_dict[page_name] = page
             self.main_window.pages.setCurrentWidget(page)
 
+# Главная страница — критические остатки и последние операции
 class DashboardPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -152,7 +150,6 @@ class DashboardPage(QWidget):
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
 
-        # ===== Левая таблица: критические остатки =====
         self.critical_table = QTableWidget()
         self.critical_table.setColumnCount(4)
         self.critical_table.setHorizontalHeaderLabels([
@@ -163,7 +160,6 @@ class DashboardPage(QWidget):
         ])
         self._style_table(self.critical_table)
 
-        # ===== Правая таблица: последние операции =====
         self.operations_table = QTableWidget()
         self.operations_table.setColumnCount(5)
         self.operations_table.setHorizontalHeaderLabels(
@@ -171,12 +167,10 @@ class DashboardPage(QWidget):
         )
         self._style_table(self.operations_table)
 
-        # ===== ЛЕВАЯ ЧАСТЬ =====
         left_layout = QVBoxLayout()
 
-        # ===== Левый заголовок =====
         critical_title = QLabel("Критические остатки по складам")
-        critical_title.setAlignment(Qt.AlignCenter)  # выравнивание по центру
+        critical_title.setAlignment(Qt.AlignCenter)
         critical_title.setStyleSheet("""
             font-size: 24px;
             font-weight: bold;
@@ -187,11 +181,10 @@ class DashboardPage(QWidget):
         left_layout.addWidget(critical_title)
         left_layout.addWidget(self.critical_table)
 
-        # ===== Правая часть =====
         right_layout = QVBoxLayout()
 
         operations_title = QLabel("Последние операции")
-        operations_title.setAlignment(Qt.AlignCenter)  # выравнивание по центру
+        operations_title.setAlignment(Qt.AlignCenter) 
         operations_title.setStyleSheet("""
             font-size: 24px;
             font-weight: bold;
@@ -202,7 +195,6 @@ class DashboardPage(QWidget):
         right_layout.addWidget(operations_title)
         right_layout.addWidget(self.operations_table)
 
-        # ===== Объединяем в горизонтальный layout =====
         content_layout.addLayout(left_layout)
         content_layout.addLayout(right_layout)
 
@@ -240,20 +232,17 @@ class DashboardPage(QWidget):
         table.setSelectionMode(QTableWidget.SingleSelection)
 
     def load_data(self):
-        # Критические остатки
         crit_rows = db.get_critical_stock()
         self.critical_table.setRowCount(len(crit_rows))
         for r, row in enumerate(crit_rows):
             for c, value in enumerate(row):
                 item = QTableWidgetItem(str(value))
-                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # выравнивание текста
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)  
                 item.setFlags(Qt.ItemIsEnabled)
                 self.critical_table.setItem(r, c, item)
 
-        self.critical_table.resizeRowsToContents()  # подгоняем высоту строк
+        self.critical_table.resizeRowsToContents() 
 
-
-        # Последние операции
         op_rows = db.get_last_operations()
         self.operations_table.setRowCount(len(op_rows))
         for r, row in enumerate(op_rows):
@@ -262,8 +251,7 @@ class DashboardPage(QWidget):
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 item.setFlags(Qt.ItemIsEnabled)
 
-                # Колонка "Тип" — добавляем иконку и цвет
-                if c == 1:  # колонка "Тип"
+                if c == 1:  
                     if str(value).lower() == "приход":
                         item.setIcon(QIcon(QPixmap("images/plus.png")))
                         item.setForeground(Qt.green)
@@ -279,7 +267,7 @@ class DashboardPage(QWidget):
         super().showEvent(event)
         self.load_data()  
 
-# Универсальный класс таблицы
+# Универсальная страница с таблицей
 class TablePage(QWidget):
     def __init__(self, title, headers, data_loader):
         super().__init__()
@@ -345,7 +333,6 @@ class TablePage(QWidget):
                 }
             """)
 
-
     def load_data(self):
         rows = self.data_loader()
         self.table.setRowCount(len(rows))
@@ -355,7 +342,6 @@ class TablePage(QWidget):
                 item.setFlags(Qt.ItemIsEnabled)
                 item.setForeground(Qt.black)
 
-                # Для колонки "Тип операции" добавляем иконку
                 if "Движение по номенклатуре" in getattr(self, "table_title", ""):
                     if self.table.horizontalHeaderItem(col_index).text() == "Тип операции":
                         if str(value).lower() in ["приход", "поступление", "+"]:
@@ -365,7 +351,6 @@ class TablePage(QWidget):
 
                 self.table.setItem(row_index, col_index, item)
         self.table.resizeRowsToContents()
-
 
     def apply_filter(self, text):
         text = text.lower()
@@ -378,7 +363,7 @@ class TablePage(QWidget):
                     break
             self.table.setRowHidden(row, not match)
 
-
+# Расширенная страница с поддержкой редактирования, добавления и удаления записей справочников
 class ReferenceTablePage(TablePage):
     def __init__(self, title, headers, data_loader,
                  table_name, id_field, fields):
@@ -388,7 +373,6 @@ class ReferenceTablePage(TablePage):
         self.fields = fields
         self._init_top_panel()
 
-    # Верхняя панель
     def _init_top_panel(self):
         panel = QWidget()
         panel.setStyleSheet("background-color: #E5E5E5;")
@@ -465,7 +449,7 @@ class ReferenceTablePage(TablePage):
         data = dict(zip([f[0] for f in self.fields], row))
         self._open_form(item_id, data)
 
-    # Диалог формы с поддержкой FK
+    # Диалог формы 
     def _open_form(self, item_id=None, data=None):
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактирование" if item_id else "Добавление")
@@ -483,7 +467,6 @@ class ReferenceTablePage(TablePage):
             field = field_def[0]
             label = field_def[1]
 
-            # ---------- FK ----------
             if len(field_def) == 3 and isinstance(field_def[2], dict):
                 fk = field_def[2]
                 combo = QComboBox()
@@ -502,7 +485,6 @@ class ReferenceTablePage(TablePage):
                 inputs[field] = combo
                 form.addRow(label + ":", combo)
 
-            # ---------- NUMERIC ----------
             elif len(field_def) == 3 and field_def[2] == "numeric":
                 edit = QDoubleSpinBox()
                 edit.setRange(0, 10_000_000)
@@ -519,7 +501,6 @@ class ReferenceTablePage(TablePage):
                 inputs[field] = edit
                 form.addRow(label + ":", edit)
 
-            # ---------- TEXT ----------
             else:
                 edit = QLineEdit()
                 edit.setFont(font)
@@ -550,7 +531,6 @@ class ReferenceTablePage(TablePage):
         values = {}
         conn = db.get_connection()
         
-        # 1️⃣ Проверка обязательных полей
         required_fields = {
             "categories_nomenclature": ["title"],
             "counterparties": ["name"],
@@ -569,14 +549,13 @@ class ReferenceTablePage(TablePage):
             "warehouses": ["title"]
         }
 
-        # Сбор значений
         for field, widget in inputs.items():
             if hasattr(widget, "text"):
                 value = widget.text().strip()
-            elif hasattr(widget, "currentText"):  # для QComboBox
+            elif hasattr(widget, "currentText"):  
                 value = widget.currentText().strip()
             else:
-                value = str(widget.value()).strip()  # для QSpinBox/QDoubleSpinBox
+                value = str(widget.value()).strip() 
             
             values[field] = value
 
@@ -608,24 +587,23 @@ class ReferenceTablePage(TablePage):
                     QMessageBox.warning(dialog, "Ошибка заполнения", f"Значение '{values[field]}' в поле '{field}' уже существует!")
                     return
 
-            # Формируем SQL
             fields_sql = ", ".join(values.keys())
             placeholders = ", ".join(["%s"] * len(values))
-            if item_id:  # редактирование
+            if item_id: 
                 set_sql = ", ".join([f"{f}=%s" for f in values.keys()])
                 cur.execute(
                     f"UPDATE {self.table_name} SET {set_sql} WHERE {self.id_field}=%s",
                     list(values.values()) + [item_id]
                 )
-            else:  # добавление
+            else: 
                 cur.execute(
                     f"INSERT INTO {self.table_name} ({fields_sql}) VALUES ({placeholders})",
                     list(values.values())
                 )
             conn.commit()
 
-        dialog.accept()  # закрываем диалог
-        self.load_data()  # обновляем таблицу
+        dialog.accept()  
+        self.load_data() 
 
     # Удаление с подтверждением
     def delete_item(self):
@@ -665,7 +643,6 @@ class ReferenceTablePage(TablePage):
             conn.close()
             self.load_data()
 
-    # Загрузка данных для FK
     def _load_fk_data(self, fk):
         conn = db.get_connection()
         cur = conn.cursor()
@@ -675,20 +652,18 @@ class ReferenceTablePage(TablePage):
         conn.close()
         return rows
 
-
+# Страница для работы с документами (приход, расход, перемещение)
 class DocumentTablePage(TablePage):
     def __init__(self, title, headers, data_loader, doc_type):
         super().__init__(title, headers, data_loader)
         self.doc_type = doc_type
 
-        # Верхняя панель с кнопками
         self.top_panel = QWidget()
         self.top_panel.setStyleSheet("background-color: #E5E5E5;")
         top_layout = QHBoxLayout(self.top_panel)
         top_layout.setContentsMargins(10, 10, 10, 10)
         top_layout.setSpacing(5)
 
-        # Кнопки
         self.btn_add = QPushButton("Добавить")
         self.btn_edit = QPushButton("Редактировать")
         self.btn_delete = QPushButton("Удалить")
@@ -712,7 +687,6 @@ class DocumentTablePage(TablePage):
 
         self.layout().insertWidget(0, self.top_panel)
 
-        # Подключаем действия
         self.btn_add.clicked.connect(self.add_document)
         self.btn_edit.clicked.connect(self.edit_document)
         self.btn_delete.clicked.connect(self.delete_document)
@@ -805,7 +779,6 @@ class DocumentTablePage(TablePage):
             warehouse_from.addItem(w[1], w[0])
             warehouse_to.addItem(w[1], w[0])
 
-        # --- таблица номенклатуры ---
         nomenclature_table = QTableWidget()
         nomenclature_table.setColumnCount(2)
         nomenclature_table.setHorizontalHeaderLabels(["Номенклатура", "Количество"])
@@ -833,7 +806,6 @@ class DocumentTablePage(TablePage):
         form.addRow("Дата:", date_input)
         form.addRow("Сотрудник:", employee_input)
 
-        # --- Контрагент и склад для прихода ---
         if self.doc_type == 'приход':
             counterparty_input.setFont(font)
             counterparty_input.setStyleSheet("background-color: white; color: black;")
@@ -842,13 +814,11 @@ class DocumentTablePage(TablePage):
             form.addRow("Контрагент:", counterparty_input)
             form.addRow("Склад:", warehouse_input)
 
-        # --- Склад для расхода ---
         elif self.doc_type == "расход":
             warehouse_input.setFont(font)
             warehouse_input.setStyleSheet("background-color: white; color: black;")
             form.addRow("Склад:", warehouse_input)
 
-        # --- Склады для перемещения ---
         elif self.doc_type == "перемещение":
             warehouse_from.setFont(font)
             warehouse_from.setStyleSheet("background-color: white; color: black;")
@@ -856,7 +826,6 @@ class DocumentTablePage(TablePage):
             warehouse_to.setStyleSheet("background-color: white; color: black;")
             form.addRow("Склад-отправитель:", warehouse_from)
             form.addRow("Склад-получатель:", warehouse_to)
-
 
         table_btn_layout = QHBoxLayout()
 
@@ -965,17 +934,14 @@ class DocumentTablePage(TablePage):
             nomenclature_table, comment_input
         ))
 
-
         layout.addWidget(save_btn)
         dialog.exec()
-
 
     def save_new_document_table(self, dialog, number_input, date_input, employee_input,
                                 counterparty_input,
                                 warehouse_input, warehouse_from, warehouse_to,
                                 nomenclature_table, comment_input):
 
-        # --- Валидация обязательных полей ---
         if not number_input.text().strip():
             QMessageBox.warning(dialog, "Ошибка", "Номер документа обязателен!")
             return
@@ -996,7 +962,6 @@ class DocumentTablePage(TablePage):
                 QMessageBox.warning(dialog, "Ошибка", "Склад отправителя и получателя не могут совпадать!")
                 return
 
-        # --- Валидация номенклатуры ---
         if nomenclature_table.rowCount() == 0:
             QMessageBox.warning(dialog, "Ошибка", "Добавьте хотя бы одну позицию номенклатуры!")
             return
@@ -1011,7 +976,6 @@ class DocumentTablePage(TablePage):
                 QMessageBox.warning(dialog, "Ошибка", f"Количество для позиции {nomenclature_table.item(row,0).text()} должно быть > 0!")
                 return
 
-        # --- Проверка уникальности номера ---
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM document WHERE number=%s", (number_input.text(),))
@@ -1041,7 +1005,6 @@ class DocumentTablePage(TablePage):
                         f"На складе {warehouse_from.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
                     return
 
-        # --- Сохранение документа ---
         cur.execute("""
             INSERT INTO document (document_type, number, date, id_employee, comment, is_processed)
             VALUES (%s, %s, %s, %s, %s, false)
@@ -1072,7 +1035,6 @@ class DocumentTablePage(TablePage):
                 VALUES (%s, %s, %s)
             """, (doc_id, warehouse_from.currentData(), warehouse_to.currentData()))
 
-        # --- Сохранение номенклатуры ---
         for row in range(nomenclature_table.rowCount()):
             nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
             qty = float(nomenclature_table.item(row, 1).text())
@@ -1087,8 +1049,6 @@ class DocumentTablePage(TablePage):
         dialog.accept()
         self.load_data()
 
-
-    # Редактирование документа 
     def edit_document(self):
         doc_id = self.get_selected_document_id()
         if not doc_id:
@@ -1097,7 +1057,6 @@ class DocumentTablePage(TablePage):
         conn = db.get_connection()
         cur = conn.cursor()
 
-        # --- основной документ ---
         cur.execute("""
             SELECT number, date, comment, id_employee
             FROM document
@@ -1105,7 +1064,6 @@ class DocumentTablePage(TablePage):
         """, (doc_id,))
         number_val, date_val, comment_val, employee_val = cur.fetchone()
 
-        # --- склады ---
         wh_from = None
         wh_to = None
 
@@ -1136,7 +1094,6 @@ class DocumentTablePage(TablePage):
             """, (doc_id,))
             wh_from, wh_to = cur.fetchone()
 
-        # --- номенклатура ---
         cur.execute("""
             SELECT id_nomenclature, quantity
             FROM nomenclature_document
@@ -1148,7 +1105,6 @@ class DocumentTablePage(TablePage):
         cur.close()
         conn.close()
 
-        # ================= ОКНО =================
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактирование документа")
         dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
@@ -1161,7 +1117,6 @@ class DocumentTablePage(TablePage):
         font = QFont()
         font.setPointSize(10)
 
-        # --- поля ---
         number_input = QLineEdit(number_val)
         date_input = QDateEdit()
         date_input.setCalendarPopup(True)
@@ -1191,8 +1146,6 @@ class DocumentTablePage(TablePage):
             if c[0] == counterparty_id:
                 counterparty_input.setCurrentIndex(counterparty_input.count() - 1)
 
-
-        # --- склады ---
         warehouse_input = QComboBox()
         warehouse_from = QComboBox()
         warehouse_to = QComboBox()
@@ -1208,7 +1161,6 @@ class DocumentTablePage(TablePage):
             if w[0] == wh_to:
                 warehouse_to.setCurrentIndex(warehouse_to.count() - 1)
 
-        # --- таблица номенклатуры ---
         nomenclature_table = QTableWidget()
         nomenclature_table.setColumnCount(2)
         nomenclature_table.setHorizontalHeaderLabels(["Номенклатура", "Количество"])
@@ -1232,7 +1184,6 @@ class DocumentTablePage(TablePage):
         nomenclature_table.setSelectionBehavior(QTableWidget.SelectRows)
         nomenclature_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        # Заполняем таблицу существующими номенклатурами
         all_nomenclature = db.get_nomenclature()
         for nc_id, qty in nomenclatures:
             row = nomenclature_table.rowCount()
@@ -1243,7 +1194,6 @@ class DocumentTablePage(TablePage):
             nomenclature_table.setItem(row, 0, name_item)
             nomenclature_table.setItem(row, 1, qty_item)
 
-        # Кнопки работы с таблицей номенклатуры
         table_btn_layout = QHBoxLayout()
         btn_add_row = QPushButton("Добавить позицию")
         btn_edit_row = QPushButton("Редактировать позицию")
@@ -1290,7 +1240,6 @@ class DocumentTablePage(TablePage):
             if selected < 0:
                 return
 
-            # ✅ Берём ID и количество
             current_nc_id = nomenclature_table.item(selected, 0).data(Qt.UserRole)
             current_qty = nomenclature_table.item(selected, 1).text()
 
@@ -1303,11 +1252,9 @@ class DocumentTablePage(TablePage):
             nc_combo.setFont(font)
             nc_combo.setStyleSheet("background-color: white; color: black;")
 
-            # Заполняем combo
             for n in all_nomenclature:
                 nc_combo.addItem(f"{n[1]} (ед: {n[3]})", n[0])
 
-            # ✅ Устанавливаем текущий элемент по ID
             index = nc_combo.findData(current_nc_id)
             if index >= 0:
                 nc_combo.setCurrentIndex(index)
@@ -1353,7 +1300,6 @@ class DocumentTablePage(TablePage):
             btn.setMinimumHeight(30)
             table_btn_layout.addWidget(btn)
 
-        # --- форма ---
         form.addRow("Номер документа:", number_input)
         form.addRow("Дата:", date_input)
         form.addRow("Сотрудник:", employee_input)
@@ -1385,7 +1331,6 @@ class DocumentTablePage(TablePage):
 
         form.addRow("Комментарий:", comment_input)
 
-        # --- кнопка ---
         save_btn = QPushButton("Сохранить изменения")
         save_btn.setMinimumHeight(35)
         save_btn.setStyleSheet(
@@ -1400,16 +1345,13 @@ class DocumentTablePage(TablePage):
             nomenclature_table, comment_input
         ))
 
-
         layout.addWidget(save_btn)
         dialog.exec()
-
 
     def save_edit_document(self, dialog, doc_id, number_input, date_input, employee_input,
                         counterparty_input, warehouse_input, warehouse_from, warehouse_to,
                         nomenclature_table, comment_input):
 
-        # --- Валидация как при добавлении ---
         if not number_input.text().strip():
             QMessageBox.warning(dialog, "Ошибка", "Номер документа обязателен!")
             return
@@ -1444,7 +1386,6 @@ class DocumentTablePage(TablePage):
                 QMessageBox.warning(dialog, "Ошибка", f"Количество для позиции {nomenclature_table.item(row,0).text()} должно быть > 0!")
                 return
 
-        # --- Проверка уникальности номера для редактирования ---
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM document WHERE number=%s AND id_document<>%s", (number_input.text(), doc_id))
@@ -1453,8 +1394,7 @@ class DocumentTablePage(TablePage):
             cur.close()
             conn.close()
             return
-        
-        # --- Проверка остатков для редактирования ---
+
         if self.doc_type == "расход":
             for row in range(nomenclature_table.rowCount()):
                 nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
@@ -1475,8 +1415,6 @@ class DocumentTablePage(TablePage):
                         f"На складе {warehouse_from.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
                     return
 
-
-        # --- Сохранение изменений ---
         cur.execute("""
             UPDATE document
             SET number=%s, date=%s, id_employee=%s, comment=%s
@@ -1534,7 +1472,6 @@ class DocumentTablePage(TablePage):
         confirm.setText(f"Точно ли вы хотите удалить документ {doc_id}?")
         confirm.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
-        # Кнопки
         yes_button = confirm.button(QMessageBox.StandardButton.Yes)
         no_button = confirm.button(QMessageBox.StandardButton.No)
         yes_button.setText("Да")
@@ -1594,7 +1531,6 @@ class DocumentTablePage(TablePage):
         cur.close()
         conn.close()
         self.load_data()
-
 
 # Главное окно
 class MainWindow(QMainWindow):
@@ -1742,7 +1678,6 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.employees_page)
         self.pages_dict["Сотрудники"] = self.employees_page
 
-
         # Контрагенты
         self.counterparties_page = ReferenceTablePage(
             "Контрагенты",
@@ -1760,7 +1695,6 @@ class MainWindow(QMainWindow):
         )
         self.pages.addWidget(self.counterparties_page)
         self.pages_dict["Контрагенты"] = self.counterparties_page
-
 
         # Склады
         self.warehouses_page = ReferenceTablePage(
@@ -1820,4 +1754,3 @@ if __name__ == "__main__":
     window = MainWindow()
     window.showFullScreen() 
     sys.exit(app.exec())
-

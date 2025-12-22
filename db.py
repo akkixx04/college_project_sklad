@@ -222,6 +222,7 @@ def get_operations():
     conn.close()
     return rows
 
+# Возвращает данные документов оприходования с контрагентами и складами
 def get_prihod_documents_full():
     conn = get_connection()
     cur = conn.cursor()
@@ -251,6 +252,7 @@ def get_prihod_documents_full():
     conn.close()
     return rows
 
+# Аналогично для расхода
 def get_rashod_documents_full():
     conn = get_connection()
     cur = conn.cursor()
@@ -278,6 +280,7 @@ def get_rashod_documents_full():
     conn.close()
     return rows
 
+# Аналогично для перемещения
 def get_peremeshchenie_documents_full():
     conn = get_connection()
     cur = conn.cursor()
@@ -307,6 +310,7 @@ def get_peremeshchenie_documents_full():
     conn.close()
     return rows
 
+# Последние 10 операций (для главного меню)
 def get_last_operations(limit=10):
     conn = get_connection()
     cur = conn.cursor()
@@ -328,26 +332,7 @@ def get_last_operations(limit=10):
     conn.close()
     return rows
 
-def get_operations_full():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT
-            o.date,
-            o.operation_type,
-            n.title AS nomenclature,
-            o.quantity,
-            w.title AS warehouse
-        FROM operations o
-        JOIN nomenclature n ON o.id_nomenclature = n.id_nomenclature
-        JOIN warehouses w ON o.id_warehouse = w.id_warehouse
-        ORDER BY o.date, n.title;
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
-
+# Текущие остатки по складам
 def get_stock_balances():
     conn = get_connection()
     cur = conn.cursor()
@@ -382,6 +367,7 @@ def get_stock_balances():
     conn.close()
     return rows
 
+# Оборотная ведомость
 def get_turnover_report():
     conn = get_connection()
     cur = conn.cursor()
@@ -407,6 +393,7 @@ def get_turnover_report():
     conn.close()
     return rows
 
+# Критические остатки
 def get_critical_stock(limit_value=20):
     conn = get_connection()
     cur = conn.cursor()
@@ -443,6 +430,7 @@ def get_critical_stock(limit_value=20):
     conn.close()
     return rows
 
+# Текущий остаток номенклатуры на конкретном складе
 def get_nomenclature_balance(id_nomenclature, id_warehouse):
     conn = get_connection()
     cur = conn.cursor()
@@ -461,6 +449,3 @@ def get_nomenclature_balance(id_nomenclature, id_warehouse):
     cur.close()
     conn.close()
     return balance
-
-
-
