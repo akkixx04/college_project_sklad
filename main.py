@@ -1,15 +1,16 @@
 import sys
 from functools import partial
+from datetime import date
 
 import db
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QPushButton, QLabel,
     QVBoxLayout, QHBoxLayout, QFrame, QStackedWidget, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy,
-    QDialog, QFormLayout, QLineEdit, QComboBox, QMessageBox
+    QDialog, QFormLayout, QLineEdit, QComboBox, QMessageBox, QDateEdit, QSpinBox, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath
+from PySide6.QtCore import Qt, QTimer, QDate
+from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QIcon
 
 # --- Логотип ---
 class Logo(QLabel):
@@ -260,14 +261,30 @@ class DashboardPage(QWidget):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 item.setFlags(Qt.ItemIsEnabled)
+
+                # Колонка "Тип" — добавляем иконку и цвет
+                if c == 1:  # колонка "Тип"
+                    if str(value).lower() == "приход":
+                        item.setIcon(QIcon(QPixmap("images/plus.png")))
+                        item.setForeground(Qt.green)
+                    elif str(value).lower() == "расход":
+                        item.setIcon(QIcon(QPixmap("images/minus.png")))
+                        item.setForeground(Qt.red)
+
                 self.operations_table.setItem(r, c, item)
+
         self.operations_table.resizeRowsToContents()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.load_data()  
 
 # Универсальный класс таблицы
 class TablePage(QWidget):
     def __init__(self, title, headers, data_loader):
         super().__init__()
         self.data_loader = data_loader
+        self.table_title = title
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
 
@@ -337,8 +354,18 @@ class TablePage(QWidget):
                 item = QTableWidgetItem(str(value))
                 item.setFlags(Qt.ItemIsEnabled)
                 item.setForeground(Qt.black)
+
+                # Для колонки "Тип операции" добавляем иконку
+                if "Движение по номенклатуре" in getattr(self, "table_title", ""):
+                    if self.table.horizontalHeaderItem(col_index).text() == "Тип операции":
+                        if str(value).lower() in ["приход", "поступление", "+"]:
+                            item.setIcon(QIcon(QPixmap("images/plus.png")))
+                        elif str(value).lower() in ["расход", "-", "списание"]:
+                            item.setIcon(QIcon(QPixmap("images/minus.png")))
+
                 self.table.setItem(row_index, col_index, item)
         self.table.resizeRowsToContents()
+
 
     def apply_filter(self, text):
         text = text.lower()
@@ -443,6 +470,7 @@ class ReferenceTablePage(TablePage):
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактирование" if item_id else "Добавление")
         dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
+        dialog.resize(700, 500)
         layout = QVBoxLayout(dialog)
         form = QFormLayout()
         layout.addLayout(form)
@@ -455,27 +483,51 @@ class ReferenceTablePage(TablePage):
             field = field_def[0]
             label = field_def[1]
 
-            if len(field_def) == 3:  # FK поле
+            # ---------- FK ----------
+            if len(field_def) == 3 and isinstance(field_def[2], dict):
                 fk = field_def[2]
                 combo = QComboBox()
                 combo.setFont(font)
-                combo.setStyleSheet("background-color: white; color: black;")  # Белый фон, черный текст
+                combo.setStyleSheet("background-color: white; color: black;")
+
                 fk_data = self._load_fk_data(fk)
                 for fk_id, fk_title in fk_data:
                     combo.addItem(str(fk_title), fk_id)
+
                 if data:
                     index = combo.findData(data.get(field))
                     if index >= 0:
                         combo.setCurrentIndex(index)
+
                 inputs[field] = combo
                 form.addRow(label + ":", combo)
 
-            else:  # обычное текстовое поле
+            # ---------- NUMERIC ----------
+            elif len(field_def) == 3 and field_def[2] == "numeric":
+                edit = QDoubleSpinBox()
+                edit.setRange(0, 10_000_000)
+                edit.setDecimals(2)
+                edit.setSingleStep(1)
+                edit.setSuffix(" м²")
+                edit.setFont(font)
+                edit.setMinimumHeight(28)
+                edit.setStyleSheet("background-color: white; color: black;")
+
+                if data and data.get(field) is not None:
+                    edit.setValue(float(data.get(field)))
+
+                inputs[field] = edit
+                form.addRow(label + ":", edit)
+
+            # ---------- TEXT ----------
+            else:
                 edit = QLineEdit()
                 edit.setFont(font)
-                edit.setStyleSheet("background-color: white; color: black;")  # Белый фон, черный текст
+                edit.setStyleSheet("background-color: white; color: black;")
+
                 if data:
                     edit.setText(str(data.get(field, "")))
+
                 inputs[field] = edit
                 form.addRow(label + ":", edit)
 
@@ -494,32 +546,86 @@ class ReferenceTablePage(TablePage):
         save_btn.clicked.connect(lambda: self._save_item(dialog, item_id, inputs))
         dialog.exec()
 
-    # Сохранение с учетом FK
     def _save_item(self, dialog, item_id, inputs):
+        values = {}
         conn = db.get_connection()
-        cur = conn.cursor()
+        
+        # 1️⃣ Проверка обязательных полей
+        required_fields = {
+            "categories_nomenclature": ["title"],
+            "counterparties": ["name"],
+            "employees": ["familia", "imya", "position"],
+            "nomenclature": ["title", "id_category", "id_unit"],
+            "units": ["title"],
+            "warehouses": ["title"]
+        }
+        
+        unique_fields = {
+            "categories_nomenclature": ["title"],
+            "counterparties": ["name", "email"],
+            "employees": ["email", "phone"],
+            "nomenclature": ["title", "article"],
+            "units": ["title", "code_unit"],
+            "warehouses": ["title"]
+        }
 
-        values = []
-        for f in inputs:
-            widget = inputs[f]
-            if isinstance(widget, QComboBox):
-                values.append(widget.currentData())
+        # Сбор значений
+        for field, widget in inputs.items():
+            if hasattr(widget, "text"):
+                value = widget.text().strip()
+            elif hasattr(widget, "currentText"):  # для QComboBox
+                value = widget.currentText().strip()
             else:
-                values.append(widget.text())
+                value = str(widget.value()).strip()  # для QSpinBox/QDoubleSpinBox
+            
+            values[field] = value
 
-        fields_sql = ", ".join(inputs.keys())
-        if item_id is None:
+        # Проверка обязательных полей
+        for field in required_fields.get(self.table_name, []):
+            if not values.get(field):
+                QMessageBox.warning(
+                    dialog,
+                    "Ошибка заполнения",
+                    f"Поле '{field}' обязательно для заполнения."
+                )
+                return
+
+        # Проверка уникальности
+        with conn.cursor() as cur:
+            for field in unique_fields.get(self.table_name, []):
+                if item_id:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {self.table_name} WHERE {field}=%s AND {self.id_field}<>%s",
+                        (values[field], item_id)
+                    )
+                else:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {self.table_name} WHERE {field}=%s",
+                        (values[field],)
+                    )
+                count = cur.fetchone()[0]
+                if count > 0:
+                    QMessageBox.warning(dialog, "Ошибка заполнения", f"Значение '{values[field]}' в поле '{field}' уже существует!")
+                    return
+
+            # Формируем SQL
+            fields_sql = ", ".join(values.keys())
             placeholders = ", ".join(["%s"] * len(values))
-            cur.execute(f"INSERT INTO {self.table_name} ({fields_sql}) VALUES ({placeholders})", values)
-        else:
-            set_sql = ", ".join(f"{f}=%s" for f in inputs.keys())
-            cur.execute(f"UPDATE {self.table_name} SET {set_sql} WHERE {self.id_field}=%s", values + [item_id])
+            if item_id:  # редактирование
+                set_sql = ", ".join([f"{f}=%s" for f in values.keys()])
+                cur.execute(
+                    f"UPDATE {self.table_name} SET {set_sql} WHERE {self.id_field}=%s",
+                    list(values.values()) + [item_id]
+                )
+            else:  # добавление
+                cur.execute(
+                    f"INSERT INTO {self.table_name} ({fields_sql}) VALUES ({placeholders})",
+                    list(values.values())
+                )
+            conn.commit()
 
-        conn.commit()
-        cur.close()
-        conn.close()
-        dialog.accept()
-        self.load_data()
+        dialog.accept()  # закрываем диалог
+        self.load_data()  # обновляем таблицу
 
     # Удаление с подтверждением
     def delete_item(self):
@@ -631,6 +737,23 @@ class DocumentTablePage(TablePage):
         """)
         top_layout.addWidget(self.search_edit)
 
+    def load_data(self):
+        rows = self.data_loader()
+        self.table.setRowCount(len(rows))
+
+        for row_index, row in enumerate(rows):
+            for col_index, value in enumerate(row):
+                if col_index == self.table.columnCount() - 1 and isinstance(value, bool):
+                    text = "Проведен" if value else "Не проведен"
+                else:
+                    text = str(value)
+
+                item = QTableWidgetItem(text)
+                item.setFlags(Qt.ItemIsEnabled)
+                item.setForeground(Qt.black)
+                self.table.setItem(row_index, col_index, item)
+
+        self.table.resizeRowsToContents()
 
     def get_selected_document_id(self):
         selected = self.table.currentRow()
@@ -640,61 +763,107 @@ class DocumentTablePage(TablePage):
 
     # Добавление документа 
     def add_document(self):
-        dialog = QDialog()
+        dialog = QDialog(self)
         dialog.setWindowTitle("Добавление документа")
         dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
+        dialog.resize(900, 650)
         layout = QVBoxLayout(dialog)
         form = QFormLayout()
         layout.addLayout(form)
         font = QFont(); font.setPointSize(10)
 
-        # Поля документа
-        number_input = QLineEdit(); date_input = QLineEdit()
-        employee_input = QComboBox(); counterparty_input = QComboBox(); warehouse_input = QComboBox()
-        for w in [number_input, date_input, employee_input, counterparty_input, warehouse_input]:
+        number_input = QLineEdit()
+        date_input = QDateEdit()
+        date_input.setCalendarPopup(True)
+        date_input.setDisplayFormat("dd.MM.yyyy")
+        date_input.setDate(QDate.currentDate())
+        date_input.setFont(font)
+        date_input.setStyleSheet("background-color: white; color: black;")
+        date_input.setMaximumDate(QDate.currentDate())
+        employee_input = QComboBox()
+
+        for w in [number_input, date_input, employee_input]:
             w.setFont(font)
             w.setStyleSheet("background-color: white; color: black;")
+
         for emp in db.get_employees():
             employee_input.addItem(f"{emp[1]} {emp[2]}", emp[0])
+
+        counterparty_input = QComboBox()
+        counterparty_input.setFont(font)
+        counterparty_input.setStyleSheet("background-color: white; color: black;")
+
         for c in db.get_contractors():
             counterparty_input.addItem(c[1], c[0])
+
+        warehouse_input = QComboBox()
+        warehouse_from = QComboBox()
+        warehouse_to = QComboBox()
+
         for w in db.get_warehouses():
             warehouse_input.addItem(w[1], w[0])
+            warehouse_from.addItem(w[1], w[0])
+            warehouse_to.addItem(w[1], w[0])
 
-        # Таблица номенклатуры
+        # --- таблица номенклатуры ---
         nomenclature_table = QTableWidget()
         nomenclature_table.setColumnCount(2)
         nomenclature_table.setHorizontalHeaderLabels(["Номенклатура", "Количество"])
+        nomenclature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        nomenclature_table.setMaximumHeight(220)
+        nomenclature_table.setMinimumHeight(180)
+        nomenclature_table.setFont(font)
+        nomenclature_table.setSelectionBehavior(QTableWidget.SelectRows)
+        nomenclature_table.setEditTriggers(QTableWidget.NoEditTriggers)
         nomenclature_table.setStyleSheet("""
             QTableWidget {
                 background-color: white;
                 color: black;
-                gridline-color: black;    
-                border: 1px solid black;   
+                gridline-color: black;
+                border: 1px solid black;
             }
             QHeaderView::section {
                 background-color: #f0f0f0;
                 color: black;
-                border: 1px solid black; 
+                border: 1px solid black;
             }
         """)
-        nomenclature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        nomenclature_table.setFont(font)
-        nomenclature_table.setSelectionBehavior(QTableWidget.SelectRows)
-        nomenclature_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        # Кнопки работы с номенклатурой
-        btn_layout = QHBoxLayout()
+        form.addRow("Номер документа:", number_input)
+        form.addRow("Дата:", date_input)
+        form.addRow("Сотрудник:", employee_input)
+
+        # --- Контрагент и склад для прихода ---
+        if self.doc_type == 'приход':
+            counterparty_input.setFont(font)
+            counterparty_input.setStyleSheet("background-color: white; color: black;")
+            warehouse_input.setFont(font)
+            warehouse_input.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Контрагент:", counterparty_input)
+            form.addRow("Склад:", warehouse_input)
+
+        # --- Склад для расхода ---
+        elif self.doc_type == "расход":
+            warehouse_input.setFont(font)
+            warehouse_input.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Склад:", warehouse_input)
+
+        # --- Склады для перемещения ---
+        elif self.doc_type == "перемещение":
+            warehouse_from.setFont(font)
+            warehouse_from.setStyleSheet("background-color: white; color: black;")
+            warehouse_to.setFont(font)
+            warehouse_to.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Склад-отправитель:", warehouse_from)
+            form.addRow("Склад-получатель:", warehouse_to)
+
+
+        table_btn_layout = QHBoxLayout()
+
         btn_add_row = QPushButton("Добавить позицию")
         btn_edit_row = QPushButton("Редактировать позицию")
         btn_delete_row = QPushButton("Удалить позицию")
-        for b in [btn_add_row, btn_edit_row, btn_delete_row]:
-            b.setStyleSheet("background-color: #AAAAAA; color: black; font-weight: bold;")
-            b.setMinimumHeight(30)
-            btn_layout.addWidget(b)
-        layout.addLayout(btn_layout)
 
-        # Логика кнопок номенклатуры
         def add_row():
             row_dialog = QDialog(); row_dialog.setWindowTitle("Добавить номенклатуру")
             row_dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
@@ -769,61 +938,155 @@ class DocumentTablePage(TablePage):
         btn_edit_row.clicked.connect(edit_row_func)
         btn_delete_row.clicked.connect(delete_row_func)
 
-        # Добавляем на форму
-        form.addRow("Номер документа:", number_input)
-        form.addRow("Дата:", date_input)
-        form.addRow("Сотрудник:", employee_input)
-        form.addRow("Контрагент:", counterparty_input)
-        form.addRow("Склад:", warehouse_input)
-        form.addRow("Номенклатура:", nomenclature_table)
-        comment_input = QLineEdit(); comment_input.setFont(font)
+        for btn in [btn_add_row, btn_edit_row, btn_delete_row]:
+            btn.setStyleSheet("background-color: #AAAAAA; color: black; font-weight: bold;")
+            btn.setMinimumHeight(30)
+            table_btn_layout.addWidget(btn)
+
+        table_container = QVBoxLayout()
+        table_container.addLayout(table_btn_layout)
+        table_container.addWidget(nomenclature_table)
+
+        form.addRow("Номенклатура:", table_container)
+
+        comment_input = QLineEdit()
+        comment_input.setFont(font)
         comment_input.setStyleSheet("background-color: white; color: black;")
         form.addRow("Комментарий:", comment_input)
 
-        save_btn = QPushButton("Сохранить"); save_btn.setMinimumHeight(35)
+        save_btn = QPushButton("Сохранить")
+        save_btn.setMinimumHeight(35)
         save_btn.setStyleSheet("background-color: #999999; color: black; font-weight: bold;")
+
         save_btn.clicked.connect(lambda: self.save_new_document_table(
-            dialog, number_input, date_input, employee_input, counterparty_input,
-            warehouse_input, nomenclature_table, comment_input
+            dialog, number_input, date_input, employee_input,
+            counterparty_input,
+            warehouse_input, warehouse_from, warehouse_to,
+            nomenclature_table, comment_input
         ))
+
+
         layout.addWidget(save_btn)
         dialog.exec()
 
-    # Сохранение нового документа 
+
     def save_new_document_table(self, dialog, number_input, date_input, employee_input,
-                                counterparty_input, warehouse_input, nomenclature_table, comment_input):
+                                counterparty_input,
+                                warehouse_input, warehouse_from, warehouse_to,
+                                nomenclature_table, comment_input):
+
+        # --- Валидация обязательных полей ---
+        if not number_input.text().strip():
+            QMessageBox.warning(dialog, "Ошибка", "Номер документа обязателен!")
+            return
+        if not employee_input.currentData():
+            QMessageBox.warning(dialog, "Ошибка", "Сотрудник обязателен!")
+            return
+        if self.doc_type == "приход" and not counterparty_input.currentData():
+            QMessageBox.warning(dialog, "Ошибка", "Контрагент обязателен!")
+            return
+        if self.doc_type in ["расход", "перемещение"] and not warehouse_input.currentData() and self.doc_type=="расход":
+            QMessageBox.warning(dialog, "Ошибка", "Склад обязателен!")
+            return
+        if self.doc_type == "перемещение":
+            if not warehouse_from.currentData() or not warehouse_to.currentData():
+                QMessageBox.warning(dialog, "Ошибка", "Выберите склады для перемещения!")
+                return
+            if warehouse_from.currentData() == warehouse_to.currentData():
+                QMessageBox.warning(dialog, "Ошибка", "Склад отправителя и получателя не могут совпадать!")
+                return
+
+        # --- Валидация номенклатуры ---
+        if nomenclature_table.rowCount() == 0:
+            QMessageBox.warning(dialog, "Ошибка", "Добавьте хотя бы одну позицию номенклатуры!")
+            return
+
+        for row in range(nomenclature_table.rowCount()):
+            qty_text = nomenclature_table.item(row, 1).text()
+            try:
+                qty = float(qty_text)
+                if qty <= 0:
+                    raise ValueError
+            except:
+                QMessageBox.warning(dialog, "Ошибка", f"Количество для позиции {nomenclature_table.item(row,0).text()} должно быть > 0!")
+                return
+
+        # --- Проверка уникальности номера ---
         conn = db.get_connection()
         cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM document WHERE number=%s", (number_input.text(),))
+        if cur.fetchone()[0] > 0:
+            QMessageBox.warning(dialog, "Ошибка", f"Документ с номером {number_input.text()} уже существует!")
+            cur.close()
+            conn.close()
+            return
+        
+        if self.doc_type == "расход":
+            for row in range(nomenclature_table.rowCount()):
+                nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
+                qty = float(nomenclature_table.item(row, 1).text())
+                available_qty = db.get_nomenclature_balance(nc_id, warehouse_input.currentData())
+                if qty > available_qty:
+                    QMessageBox.warning(dialog, "Ошибка", 
+                        f"На складе {warehouse_input.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
+                    return
+
+        elif self.doc_type == "перемещение":
+            for row in range(nomenclature_table.rowCount()):
+                nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
+                qty = float(nomenclature_table.item(row, 1).text())
+                available_qty = db.get_nomenclature_balance(nc_id, warehouse_from.currentData())
+                if qty > available_qty:
+                    QMessageBox.warning(dialog, "Ошибка", 
+                        f"На складе {warehouse_from.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
+                    return
+
+        # --- Сохранение документа ---
         cur.execute("""
             INSERT INTO document (document_type, number, date, id_employee, comment, is_processed)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id_document;
-        """, (self.doc_type, number_input.text(), date_input.text(),
-              employee_input.currentData(), comment_input.text(), False))
+            VALUES (%s, %s, %s, %s, %s, false)
+            RETURNING id_document
+        """, (
+            self.doc_type,
+            number_input.text(),
+            date_input.date().toString("yyyy-MM-dd"),
+            employee_input.currentData(),
+            comment_input.text()
+        ))
+
         doc_id = cur.fetchone()[0]
 
-        # Заполнение связанных таблиц
-        if self.doc_type == 'приход':
-            cur.execute("INSERT INTO document_prihoda (id_document, id_counterparty, id_warehouse) VALUES (%s, %s, %s)",
-                        (doc_id, counterparty_input.currentData(), warehouse_input.currentData()))
-        elif self.doc_type == 'расход':
-            cur.execute("INSERT INTO document_rashoda (id_document, id_warehouse) VALUES (%s, %s)",
-                        (doc_id, warehouse_input.currentData()))
-        elif self.doc_type == 'перемещение':
-            cur.execute("INSERT INTO document_peremeshenie (id_document, id_warehouse_from, id_warehouse_to) VALUES (%s, %s, %s)",
-                        (doc_id, warehouse_input.currentData(), warehouse_input.currentData()))
+        if self.doc_type == "приход":
+            cur.execute("""
+                INSERT INTO document_prihoda (id_document, id_counterparty, id_warehouse)
+                VALUES (%s, %s, %s)
+            """, (doc_id, counterparty_input.currentData(), warehouse_input.currentData()))
+        elif self.doc_type == "расход":
+            cur.execute("""
+                INSERT INTO document_rashoda (id_document, id_warehouse)
+                VALUES (%s, %s)
+            """, (doc_id, warehouse_input.currentData()))
+        elif self.doc_type == "перемещение":
+            cur.execute("""
+                INSERT INTO document_peremeshenie (id_document, id_warehouse_from, id_warehouse_to)
+                VALUES (%s, %s, %s)
+            """, (doc_id, warehouse_from.currentData(), warehouse_to.currentData()))
 
-        # Сохранение номенклатуры
+        # --- Сохранение номенклатуры ---
         for row in range(nomenclature_table.rowCount()):
             nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
             qty = float(nomenclature_table.item(row, 1).text())
-            cur.execute("INSERT INTO nomenclature_document (id_document, id_nomenclature, quantity) VALUES (%s, %s, %s)",
-                        (doc_id, nc_id, qty))
+            cur.execute("""
+                INSERT INTO nomenclature_document (id_document, id_nomenclature, quantity)
+                VALUES (%s, %s, %s)
+            """, (doc_id, nc_id, qty))
 
         conn.commit()
         cur.close()
         conn.close()
         dialog.accept()
         self.load_data()
+
 
     # Редактирование документа 
     def edit_document(self):
@@ -833,68 +1096,125 @@ class DocumentTablePage(TablePage):
 
         conn = db.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT number, date, comment, id_employee FROM document WHERE id_document=%s", (doc_id,))
-        doc_row = cur.fetchone()
-        number_val, date_val, comment_val, employee_val = doc_row
 
-        cur.execute("SELECT id_nomenclature, quantity FROM nomenclature_document WHERE id_document=%s", (doc_id,))
+        # --- основной документ ---
+        cur.execute("""
+            SELECT number, date, comment, id_employee
+            FROM document
+            WHERE id_document = %s
+        """, (doc_id,))
+        number_val, date_val, comment_val, employee_val = cur.fetchone()
+
+        # --- склады ---
+        wh_from = None
+        wh_to = None
+
+        counterparty_id = None
+
+        if self.doc_type == "приход":
+            cur.execute("""
+                SELECT id_warehouse, id_counterparty
+                FROM document_prihoda
+                WHERE id_document = %s
+            """, (doc_id,))
+            wh_from, counterparty_id = cur.fetchone()
+
+
+        elif self.doc_type == "расход":
+            cur.execute("""
+                SELECT id_warehouse
+                FROM document_rashoda
+                WHERE id_document = %s
+            """, (doc_id,))
+            wh_from = cur.fetchone()[0]
+
+        elif self.doc_type == "перемещение":
+            cur.execute("""
+                SELECT id_warehouse_from, id_warehouse_to
+                FROM document_peremeshenie
+                WHERE id_document = %s
+            """, (doc_id,))
+            wh_from, wh_to = cur.fetchone()
+
+        # --- номенклатура ---
+        cur.execute("""
+            SELECT id_nomenclature, quantity
+            FROM nomenclature_document
+            WHERE id_document = %s
+        """, (doc_id,))
+
         nomenclatures = cur.fetchall()
-
-        if self.doc_type == 'приход':
-            cur.execute("SELECT id_warehouse, id_counterparty FROM document_prihoda WHERE id_document=%s", (doc_id,))
-            wh_row = cur.fetchone()
-            warehouse_id, counterparty_id = wh_row
-        else:
-            warehouse_id = counterparty_id = None
 
         cur.close()
         conn.close()
 
-        dialog = QDialog()
+        # ================= ОКНО =================
+        dialog = QDialog(self)
         dialog.setWindowTitle("Редактирование документа")
         dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
+        dialog.resize(900, 650)
+
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(15, 15, 15, 15)
         form = QFormLayout()
         layout.addLayout(form)
-        font = QFont(); font.setPointSize(10)
 
-        # Поля документа
-        number_input = QLineEdit(str(number_val)); number_input.setFont(font)
-        number_input.setStyleSheet("background-color: white; color: black;")
-        date_input = QLineEdit(str(date_val)); date_input.setFont(font)
+        font = QFont()
+        font.setPointSize(10)
+
+        # --- поля ---
+        number_input = QLineEdit(number_val)
+        date_input = QDateEdit()
+        date_input.setCalendarPopup(True)
+        date_input.setDisplayFormat("dd.MM.yyyy")
+        date_input.setDate(QDate.fromString(date_val.strftime("%Y-%m-%d"), "yyyy-MM-dd"))
+        date_input.setFont(font)
         date_input.setStyleSheet("background-color: white; color: black;")
-        employee_input = QComboBox(); employee_input.setFont(font)
-        employee_input.setStyleSheet("background-color: white; color: black;")
+        date_input.setMaximumDate(QDate.currentDate())
+        comment_input = QLineEdit(comment_val)
+
+        employee_input = QComboBox()
         for emp in db.get_employees():
             employee_input.addItem(f"{emp[1]} {emp[2]}", emp[0])
-        index = employee_input.findData(employee_val)
-        if index >= 0:
-            employee_input.setCurrentIndex(index)
+            if emp[0] == employee_val:
+                employee_input.setCurrentIndex(employee_input.count() - 1)
 
-        counterparty_input = QComboBox(); counterparty_input.setFont(font)
+        for w in [number_input, date_input, comment_input, employee_input]:
+            w.setFont(font)
+            w.setStyleSheet("background-color: white; color: black;")
+
+        counterparty_input = QComboBox()
+        counterparty_input.setFont(font)
         counterparty_input.setStyleSheet("background-color: white; color: black;")
+
         for c in db.get_contractors():
             counterparty_input.addItem(c[1], c[0])
-        if counterparty_id:
-            index = counterparty_input.findData(counterparty_id)
-            if index >= 0:
-                counterparty_input.setCurrentIndex(index)
+            if c[0] == counterparty_id:
+                counterparty_input.setCurrentIndex(counterparty_input.count() - 1)
 
-        warehouse_input = QComboBox(); warehouse_input.setFont(font)
-        warehouse_input.setStyleSheet("background-color: white; color: black;")
+
+        # --- склады ---
+        warehouse_input = QComboBox()
+        warehouse_from = QComboBox()
+        warehouse_to = QComboBox()
+
         for w in db.get_warehouses():
             warehouse_input.addItem(w[1], w[0])
-        if warehouse_id:
-            index = warehouse_input.findData(warehouse_id)
-            if index >= 0:
-                warehouse_input.setCurrentIndex(index)
+            warehouse_from.addItem(w[1], w[0])
+            warehouse_to.addItem(w[1], w[0])
 
-        # Таблица номенклатуры
+            if w[0] == wh_from:
+                warehouse_input.setCurrentIndex(warehouse_input.count() - 1)
+                warehouse_from.setCurrentIndex(warehouse_from.count() - 1)
+            if w[0] == wh_to:
+                warehouse_to.setCurrentIndex(warehouse_to.count() - 1)
+
+        # --- таблица номенклатуры ---
         nomenclature_table = QTableWidget()
         nomenclature_table.setColumnCount(2)
         nomenclature_table.setHorizontalHeaderLabels(["Номенклатура", "Количество"])
         nomenclature_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        nomenclature_table.setMaximumHeight(220)
+        nomenclature_table.setMinimumHeight(180)
         nomenclature_table.setFont(font)
         nomenclature_table.setStyleSheet("""
             QTableWidget {
@@ -969,25 +1289,38 @@ class DocumentTablePage(TablePage):
             selected = nomenclature_table.currentRow()
             if selected < 0:
                 return
-            current_nc = nomenclature_table.item(selected, 0).text()
+
+            # ✅ Берём ID и количество
+            current_nc_id = nomenclature_table.item(selected, 0).data(Qt.UserRole)
             current_qty = nomenclature_table.item(selected, 1).text()
+
             row_dialog = QDialog()
             row_dialog.setWindowTitle("Редактировать номенклатуру")
-            row_layout = QFormLayout(row_dialog)
             row_dialog.setStyleSheet("background-color: #CCCCCC; color: black;")
-            nc_combo = QComboBox(); nc_combo.setFont(font)
+            row_layout = QFormLayout(row_dialog)
+
+            nc_combo = QComboBox()
+            nc_combo.setFont(font)
             nc_combo.setStyleSheet("background-color: white; color: black;")
+
+            # Заполняем combo
             for n in all_nomenclature:
                 nc_combo.addItem(f"{n[1]} (ед: {n[3]})", n[0])
-            for i in range(nc_combo.count()):
-                if nc_combo.itemText(i) == current_nc:
-                    nc_combo.setCurrentIndex(i)
-                    break
-            qty_input = QLineEdit(current_qty); qty_input.setFont(font)
+
+            # ✅ Устанавливаем текущий элемент по ID
+            index = nc_combo.findData(current_nc_id)
+            if index >= 0:
+                nc_combo.setCurrentIndex(index)
+
+            qty_input = QLineEdit(current_qty)
+            qty_input.setFont(font)
             qty_input.setStyleSheet("background-color: white; color: black;")
+
             row_layout.addRow("Номенклатура:", nc_combo)
             row_layout.addRow("Количество:", qty_input)
-            save_btn = QPushButton("Сохранить"); save_btn.setStyleSheet("background-color: #999999; color: black; font-weight: bold;")
+
+            save_btn = QPushButton("Сохранить")
+            save_btn.setStyleSheet("background-color: #999999; color: black; font-weight: bold;")
             row_layout.addWidget(save_btn)
 
             def accept_row():
@@ -996,9 +1329,11 @@ class DocumentTablePage(TablePage):
                 except ValueError:
                     QMessageBox.warning(row_dialog, "Ошибка", "Количество должно быть числом")
                     return
+
                 nomenclature_table.item(selected, 0).setText(nc_combo.currentText())
                 nomenclature_table.item(selected, 0).setData(Qt.UserRole, nc_combo.currentData())
                 nomenclature_table.item(selected, 1).setText(str(qty))
+
                 row_dialog.accept()
 
             save_btn.clicked.connect(accept_row)
@@ -1013,63 +1348,174 @@ class DocumentTablePage(TablePage):
         btn_edit_row.clicked.connect(edit_row_func)
         btn_delete_row.clicked.connect(delete_row_func)
 
-        # Добавляем поля на форму
+        for btn in [btn_add_row, btn_edit_row, btn_delete_row]:
+            btn.setStyleSheet("background-color: #AAAAAA; color: black; font-weight: bold;")
+            btn.setMinimumHeight(30)
+            table_btn_layout.addWidget(btn)
+
+        # --- форма ---
         form.addRow("Номер документа:", number_input)
         form.addRow("Дата:", date_input)
         form.addRow("Сотрудник:", employee_input)
-        form.addRow("Контрагент:", counterparty_input)
-        form.addRow("Склад:", warehouse_input)
-        form.addRow("Номенклатура и количество:", nomenclature_table)
-        layout.addLayout(table_btn_layout)
 
-        comment_input = QLineEdit(str(comment_val)); comment_input.setFont(font)
-        comment_input.setStyleSheet("background-color: white; color: black;")
+        if self.doc_type == "приход":
+            counterparty_input.setFont(font)
+            counterparty_input.setStyleSheet("background-color: white; color: black;")
+            warehouse_input.setFont(font)
+            warehouse_input.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Контрагент:", counterparty_input)  
+            form.addRow("Склад:", warehouse_input)
+        elif self.doc_type == "расход":
+            warehouse_input.setFont(font)
+            warehouse_input.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Склад:", warehouse_input)
+        elif self.doc_type == "перемещение":
+            warehouse_from.setFont(font)
+            warehouse_from.setStyleSheet("background-color: white; color: black;")
+            warehouse_to.setFont(font)
+            warehouse_to.setStyleSheet("background-color: white; color: black;")
+            form.addRow("Склад-отправитель:", warehouse_from)
+            form.addRow("Склад-получатель:", warehouse_to)
+
+        table_container = QVBoxLayout()
+        table_container.addLayout(table_btn_layout)
+        table_container.addWidget(nomenclature_table)
+
+        form.addRow("Номенклатура:", table_container)
+
         form.addRow("Комментарий:", comment_input)
 
-        save_btn = QPushButton("Сохранить"); save_btn.setStyleSheet("background-color: #999999; color: black; font-weight: bold;")
+        # --- кнопка ---
+        save_btn = QPushButton("Сохранить изменения")
         save_btn.setMinimumHeight(35)
+        save_btn.setStyleSheet(
+            "background-color: #999999; color: black; font-weight: bold;"
+        )
+
         save_btn.clicked.connect(lambda: self.save_edit_document(
-            dialog, doc_id, number_input, date_input, employee_input, counterparty_input,
-            warehouse_input, nomenclature_table, comment_input
+            dialog, doc_id,
+            number_input, date_input, employee_input,
+            counterparty_input,
+            warehouse_input, warehouse_from, warehouse_to,
+            nomenclature_table, comment_input
         ))
+
+
         layout.addWidget(save_btn)
         dialog.exec()
 
-    def save_edit_document(self, dialog, doc_id, number_input, date_input, employee_input, counterparty_input,
-                           warehouse_input, nomenclature_table, comment_input):
+
+    def save_edit_document(self, dialog, doc_id, number_input, date_input, employee_input,
+                        counterparty_input, warehouse_input, warehouse_from, warehouse_to,
+                        nomenclature_table, comment_input):
+
+        # --- Валидация как при добавлении ---
+        if not number_input.text().strip():
+            QMessageBox.warning(dialog, "Ошибка", "Номер документа обязателен!")
+            return
+        if not employee_input.currentData():
+            QMessageBox.warning(dialog, "Ошибка", "Сотрудник обязателен!")
+            return
+        if self.doc_type == "приход" and not counterparty_input.currentData():
+            QMessageBox.warning(dialog, "Ошибка", "Контрагент обязателен!")
+            return
+        if self.doc_type in ["расход", "перемещение"] and self.doc_type=="расход" and not warehouse_input.currentData():
+            QMessageBox.warning(dialog, "Ошибка", "Склад обязателен!")
+            return
+        if self.doc_type == "перемещение":
+            if not warehouse_from.currentData() or not warehouse_to.currentData():
+                QMessageBox.warning(dialog, "Ошибка", "Выберите склады для перемещения!")
+                return
+            if warehouse_from.currentData() == warehouse_to.currentData():
+                QMessageBox.warning(dialog, "Ошибка", "Склад отправителя и получателя не могут совпадать!")
+                return
+
+        if nomenclature_table.rowCount() == 0:
+            QMessageBox.warning(dialog, "Ошибка", "Добавьте хотя бы одну позицию номенклатуры!")
+            return
+
+        for row in range(nomenclature_table.rowCount()):
+            qty_text = nomenclature_table.item(row, 1).text()
+            try:
+                qty = float(qty_text)
+                if qty <= 0:
+                    raise ValueError
+            except:
+                QMessageBox.warning(dialog, "Ошибка", f"Количество для позиции {nomenclature_table.item(row,0).text()} должно быть > 0!")
+                return
+
+        # --- Проверка уникальности номера для редактирования ---
         conn = db.get_connection()
         cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM document WHERE number=%s AND id_document<>%s", (number_input.text(), doc_id))
+        if cur.fetchone()[0] > 0:
+            QMessageBox.warning(dialog, "Ошибка", f"Документ с номером {number_input.text()} уже существует!")
+            cur.close()
+            conn.close()
+            return
+        
+        # --- Проверка остатков для редактирования ---
+        if self.doc_type == "расход":
+            for row in range(nomenclature_table.rowCount()):
+                nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
+                qty = float(nomenclature_table.item(row, 1).text())
+                available_qty = db.get_nomenclature_balance(nc_id, warehouse_input.currentData())
+                if qty > available_qty:
+                    QMessageBox.warning(dialog, "Ошибка", 
+                        f"На складе {warehouse_input.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
+                    return
 
+        elif self.doc_type == "перемещение":
+            for row in range(nomenclature_table.rowCount()):
+                nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
+                qty = float(nomenclature_table.item(row, 1).text())
+                available_qty = db.get_nomenclature_balance(nc_id, warehouse_from.currentData())
+                if qty > available_qty:
+                    QMessageBox.warning(dialog, "Ошибка", 
+                        f"На складе {warehouse_from.currentText()} недостаточно номенклатуры {nomenclature_table.item(row,0).text()}. Доступно: {available_qty}")
+                    return
+
+
+        # --- Сохранение изменений ---
         cur.execute("""
-            UPDATE document SET number=%s, date=%s, id_employee=%s, comment=%s WHERE id_document=%s
-        """, (str(number_input.text()), str(date_input.text()), employee_input.currentData(), str(comment_input.text()), doc_id))
+            UPDATE document
+            SET number=%s, date=%s, id_employee=%s, comment=%s
+            WHERE id_document=%s
+        """, (
+            number_input.text(),
+            date_input.date().toString("yyyy-MM-dd"),
+            employee_input.currentData(),
+            comment_input.text(),
+            doc_id
+        ))
 
-        if self.doc_type == 'приход':
-            cur.execute("UPDATE document_prihoda SET id_warehouse=%s, id_counterparty=%s WHERE id_document=%s",
-                        (warehouse_input.currentData(), counterparty_input.currentData(), doc_id))
-        elif self.doc_type == 'расход':
-            cur.execute("UPDATE document_rashoda SET id_warehouse=%s WHERE id_document=%s",
-                        (warehouse_input.currentData(), doc_id))
-        elif self.doc_type == 'перемещение':
-            cur.execute("UPDATE document_peremeshenie SET id_warehouse_from=%s, id_warehouse_to=%s WHERE id_document=%s",
-                        (warehouse_input.currentData(), warehouse_input.currentData(), doc_id))
+        if self.doc_type == "приход":
+            cur.execute("""
+                UPDATE document_prihoda
+                SET id_warehouse=%s, id_counterparty=%s
+                WHERE id_document=%s
+            """, (warehouse_input.currentData(), counterparty_input.currentData(), doc_id))
+        elif self.doc_type == "расход":
+            cur.execute("""
+                UPDATE document_rashoda
+                SET id_warehouse=%s
+                WHERE id_document=%s
+            """, (warehouse_input.currentData(), doc_id))
+        elif self.doc_type == "перемещение":
+            cur.execute("""
+                UPDATE document_peremeshenie
+                SET id_warehouse_from=%s, id_warehouse_to=%s
+                WHERE id_document=%s
+            """, (warehouse_from.currentData(), warehouse_to.currentData(), doc_id))
 
-        # Сначала удаляем старые строки номенклатуры
         cur.execute("DELETE FROM nomenclature_document WHERE id_document=%s", (doc_id,))
         for row in range(nomenclature_table.rowCount()):
-            name_item = nomenclature_table.item(row, 0)
-            qty_item = nomenclature_table.item(row, 1)
-            if name_item and qty_item:
-                nomenclature_id = int(name_item.data(Qt.UserRole)) if name_item.data(Qt.UserRole) else None
-                try:
-                    quantity = float(qty_item.text())
-                except:
-                    quantity = 0
-                if nomenclature_id:
-                    cur.execute(
-                        "INSERT INTO nomenclature_document (id_document, id_nomenclature, quantity) VALUES (%s, %s, %s)",
-                        (doc_id, nomenclature_id, quantity)
-                    )
+            nc_id = nomenclature_table.item(row, 0).data(Qt.UserRole)
+            qty = float(nomenclature_table.item(row, 1).text())
+            cur.execute("""
+                INSERT INTO nomenclature_document (id_document, id_nomenclature, quantity)
+                VALUES (%s, %s, %s)
+            """, (doc_id, nc_id, qty))
 
         conn.commit()
         cur.close()
@@ -1285,9 +1731,9 @@ class MainWindow(QMainWindow):
             table_name="employees",
             id_field="id_employee",
             fields=[
-                ("last_name", "Фамилия"),
-                ("first_name", "Имя"),
-                ("middle_name", "Отчество"),
+                ("familia", "Фамилия"),
+                ("imya", "Имя"),
+                ("otchestvo", "Отчество"),
                 ("position", "Должность"),
                 ("phone", "Телефон"),
                 ("email", "Email")
@@ -1298,12 +1744,12 @@ class MainWindow(QMainWindow):
 
 
         # Контрагенты
-        self.contractors_page = ReferenceTablePage(
+        self.counterparties_page = ReferenceTablePage(
             "Контрагенты",
             ["ID", "Наименование", "Менеджер", "Телефон", "Email", "Адрес"],
             db.get_contractors,
-            table_name="contractors",
-            id_field="id_contractor",
+            table_name="counterparties",
+            id_field="id_counterparty",
             fields=[
                 ("name", "Наименование"),
                 ("manager", "Менеджер"),
@@ -1312,8 +1758,8 @@ class MainWindow(QMainWindow):
                 ("address", "Адрес")
             ]
         )
-        self.pages.addWidget(self.contractors_page)
-        self.pages_dict["Контрагенты"] = self.contractors_page
+        self.pages.addWidget(self.counterparties_page)
+        self.pages_dict["Контрагенты"] = self.counterparties_page
 
 
         # Склады
@@ -1326,7 +1772,7 @@ class MainWindow(QMainWindow):
             fields=[
                 ("title", "Наименование"),
                 ("address", "Адрес"),
-                ("capacity_m2", "Вместимость (м²)"),
+                ("capacity_m2", "Вместимость (м²)", "numeric"),
                 ("responsible", "Ответственный", {
                     "table": "employees",
                     "id": "id_employee",

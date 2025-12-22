@@ -443,5 +443,24 @@ def get_critical_stock(limit_value=20):
     conn.close()
     return rows
 
+def get_nomenclature_balance(id_nomenclature, id_warehouse):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COALESCE(SUM(
+            CASE
+                WHEN o.operation_type = 'приход' THEN o.quantity
+                WHEN o.operation_type = 'расход' THEN -o.quantity
+                ELSE 0
+            END
+        ), 0) AS balance
+        FROM operations o
+        WHERE o.id_nomenclature = %s AND o.id_warehouse = %s
+    """, (id_nomenclature, id_warehouse))
+    balance = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return balance
+
 
 
