@@ -550,13 +550,21 @@ class ReferenceTablePage(TablePage):
         }
 
         for field, widget in inputs.items():
-            if hasattr(widget, "text"):
+            if isinstance(widget, QLineEdit):
                 value = widget.text().strip()
-            elif hasattr(widget, "currentText"):  
-                value = widget.currentText().strip()
+
+            elif isinstance(widget, QComboBox):
+                value = widget.currentData()
+
+            elif isinstance(widget, QDateEdit):
+                value = widget.date().toPython()
+
+            elif isinstance(widget, QDoubleSpinBox):
+                value = widget.value()
+
             else:
-                value = str(widget.value()).strip() 
-            
+                value = None
+
             values[field] = value
 
         # Проверка обязательных полей
